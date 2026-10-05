@@ -37,16 +37,20 @@ def increaseCartQuantity(user_id, product_id):
     cursor = db_config.cursor()
 
     query = """
-        UPDATE CART
-        SET QUANTITY = QUANTITY + 1,
-            UPDATED_AT = CURRENT_TIMESTAMP
-        WHERE USER_ID = %s AND PRODUCTID = %s;
+        UPDATE CART C
+        JOIN PRODUCTS P ON P.PRODUCTID = C.PRODUCTID
+        SET C.QUANTITY = C.QUANTITY + 1,
+            C.UPDATED_AT = CURRENT_TIMESTAMP
+        WHERE C.USER_ID = %s AND C.PRODUCTID = %s
+          AND C.QUANTITY < P.STOCK AND P.ACTIVE = 1;
     """
 
     cursor.execute(query, (user_id, product_id))
+    updated = cursor.rowcount > 0
     db_config.commit()
     cursor.close()
     db_config.close()
+    return updated
 
 
 def insertCartItem(user_id, product_id, price):
@@ -106,20 +110,27 @@ def removeFromCart(user_id: int, product_id: int):
 
 
 def updateCartQuantity(quantity: int, user_id: int, product_id: int):
+    if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+        raise ValueError("Cart quantity must be a positive integer")
+
     db_config = databaseConfig()
     cursor = db_config.cursor()
 
     query = """
-        UPDATE CART
-        SET QUANTITY = %s,
-            UPDATED_AT = CURRENT_TIMESTAMP
-        WHERE USER_ID = %s AND PRODUCTID = %s;
+        UPDATE CART C
+        JOIN PRODUCTS P ON P.PRODUCTID = C.PRODUCTID
+        SET C.QUANTITY = %s,
+            C.UPDATED_AT = CURRENT_TIMESTAMP
+        WHERE C.USER_ID = %s AND C.PRODUCTID = %s
+          AND %s <= P.STOCK AND P.ACTIVE = 1;
     """
 
-    cursor.execute(query, (quantity, user_id, product_id))
+    cursor.execute(query, (quantity, user_id, product_id, quantity))
+    updated = cursor.rowcount > 0
     db_config.commit()
     cursor.close()
     db_config.close()
+    return updated
 
 
 def getProductsBasedOnSearch(product_name: str):
@@ -181,19 +192,28 @@ def placeOrder(user_id, fullname, phone, address, city, pincode, total_amount, c
     cursor.execute("DELETE FROM CART WHERE USER_ID=%s", (user_id,))
 
     for item in cart_items:
-        cursor.execute("select STOCK from products where productid = %s", (item["PRODUCTID"],))
-        row = cursor.fetchone()
-        current_quantity = row["STOCK"] if row else 0
-        if current_quantity >= item["QUANTITY"]:
-            cursor.execute(
-                "update products set STOCK = STOCK - %s WHERE PRODUCTID = %s",
-                (item["QUANTITY"], item["PRODUCTID"]),
-            )
-        else:
+        if item["QUANTITY"] < 1:
             db.rollback()
             cursor.close()
             db.close()
-            return False, f"{item['NAME']} avalilabe quantity is {current_quantity}"
+            return False, f"{item['NAME']} has an invalid quantity"
+
+        cursor.execute(
+            """
+            UPDATE PRODUCTS
+            SET STOCK = STOCK - %s
+            WHERE PRODUCTID = %s AND STOCK >= %s AND ACTIVE = 1
+            """,
+            (item["QUANTITY"], item["PRODUCTID"], item["QUANTITY"]),
+        )
+        if cursor.rowcount == 0:
+            cursor.execute("SELECT STOCK FROM PRODUCTS WHERE PRODUCTID = %s", (item["PRODUCTID"],))
+            row = cursor.fetchone()
+            current_quantity = row["STOCK"] if row else 0
+            db.rollback()
+            cursor.close()
+            db.close()
+            return False, f"{item['NAME']} available quantity is {current_quantity}"
 
     db.commit()
     cursor.close()
@@ -218,4 +238,3 @@ def myOrders(user_id):
     cursor.close()
     db.close()
     return orders
-

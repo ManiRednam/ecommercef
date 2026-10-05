@@ -17,7 +17,7 @@ def createTables():
 
         PROFILE_IMAGE VARCHAR(255),   -- image path or URL
 
-        ROLE ENUM('admin','user') DEFAULT 'admin',
+        ROLE ENUM('admin','user') DEFAULT 'user',
         STATUS TINYINT(1) DEFAULT 1,
 
         CREATED_AT TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -112,4 +112,3 @@ def createTables():
 
     cursor.close()
     db_config.close()
-

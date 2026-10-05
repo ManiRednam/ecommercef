@@ -15,9 +15,8 @@ def create_api_admin_blueprint(db_utility_module, userutility_module, get_user_d
 
     api_admin = Blueprint('api_admin', __name__, url_prefix='/api/admin')
 
-    # Decorators can access current_app safely at request time
     @api_admin.get('/dashboard')
-    @token_required(current_app._get_current_object(), role='admin')
+    @token_required(role='admin')
 
     def dashboard():
 
@@ -141,4 +140,3 @@ def create_api_admin_blueprint(db_utility_module, userutility_module, get_user_d
         return json_success({"orders": normalized, "count": len(normalized)})
 
     return api_admin
-
