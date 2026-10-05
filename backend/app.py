@@ -41,11 +41,15 @@ FRONTEND_BUILD_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend', '
 
 def create_app():
     app = Flask(__name__)
-    app.config['SECRET_KEY'] = "srinubabu@123"
+    secret_key = os.environ.get('SECRET_KEY')
+    if not secret_key:
+        app.logger.warning("SECRET_KEY is not configured; using an ephemeral key")
+        secret_key = os.urandom(32)
+    app.config['SECRET_KEY'] = secret_key
 
     # uploads
-    app.config['PROFILE_UPLOAD_FOLDER'] = os.path.join('static', 'uploads', 'profiles')
-    app.config['PRODUCT_UPLOAD_FOLDER'] = os.path.join('static', 'uploads', 'products')
+    app.config['PROFILE_UPLOAD_FOLDER'] = os.path.join(app.static_folder, 'uploads', 'profiles')
+    app.config['PRODUCT_UPLOAD_FOLDER'] = os.path.join(app.static_folder, 'uploads', 'products')
     os.makedirs(app.config['PRODUCT_UPLOAD_FOLDER'], exist_ok=True)
     app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'webp'}
 
@@ -55,8 +59,6 @@ def create_app():
         userutility_module=None,
         get_user_details_by_id=None,
     )
-    app.config['PRODUCT_UPLOAD_FOLDER'] = os.path.join('static', 'uploads', 'products')
-    app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'webp'}
     app.register_blueprint(api_admin_bp)
 
     return app
@@ -92,7 +94,7 @@ def token_required(role=None):
                 return redirect(url_for('login'))
 
             if role and data['role'] != role:
-                return "Unauthorized access"
+                return "Unauthorized access", 403
 
             return f(*args, **kwargs)
         return decorated
@@ -174,7 +176,8 @@ def login():
                 'token',
                 token,
                 httponly=True,
-                secure=False  # True in production (HTTPS)
+                secure=not app.debug,
+                samesite='Lax',
             )
 
             return response
@@ -187,12 +190,6 @@ def login():
 
 
 # ---------------------- images upload path ------------------
-PROFILE_UPLOAD_FOLDER = 'static/uploads/profile'
-PRODUCT_UPLOAD_FOLDER = 'static/uploads/products'
-
-app.config['PROFILE_UPLOAD_FOLDER'] = os.path.join('static', 'uploads', 'profiles')
-app.config['PRODUCT_UPLOAD_FOLDER'] = os.path.join('static', 'uploads', 'products')
-os.makedirs(app.config['PRODUCT_UPLOAD_FOLDER'], exist_ok=True)
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'webp'}
 
 
@@ -232,12 +229,12 @@ def register():
                 filename = secure_filename(profile_image.filename)
                 os.makedirs(app.config['PROFILE_UPLOAD_FOLDER'], exist_ok=True)
 
-                image_path = os.path.join(
+                save_path = os.path.join(
                     app.config['PROFILE_UPLOAD_FOLDER'],
                     filename
                 )
-
-                profile_image.save(image_path)
+                profile_image.save(save_path)
+                image_path = os.path.join('static', 'uploads', 'profiles', filename)
             else:
                 flash("Invalid image format")
                 return redirect(url_for('register'))
@@ -457,6 +454,9 @@ def adminorders():
 @token_required(role='admin')
 def view_order(order_id):
     order, items = viewOrderDetails(order_id)
+    if not order:
+        flash("Order not found", "danger")
+        return redirect(url_for('adminorders'))
 
     return render_template(
         'admin/view_order.html',
@@ -500,7 +500,7 @@ def adminprofile():
         phone = request.form.get('phone')
 
         updateAdminProfile(
-            userid=user['userid'],
+            user_id=user['USER_ID'],
             name=name,
             phone=phone
         )
@@ -516,26 +516,25 @@ def adminprofile():
 
 
 @app.route('/admin/change-password', methods=['POST'])
+@token_required(role='admin')
 def admin_change_password():
     user = getUserByToken()
 
-    if not user or user['ROLE'] != 'admin':
+    if not user:
         return redirect(url_for('login'))
 
     current_password = request.form.get('current_password')
     new_password = request.form.get('new_password')
 
-    # Verify current password
-    if not check_password_hash(user['PASSWORD'], current_password):
-        return redirect(url_for('admin_profile'))
+    if not current_password or not new_password or not check_password_hash(user['PASSWORD'], current_password):
+        flash("Current password is incorrect or the new password is missing", "danger")
+        return redirect(url_for('adminprofile'))
 
     hashed_password = generate_password_hash(new_password)
 
-    
-    # update admin profile in database
-    updateAdminProfile(new_password=hashed_password, user_id=user['PASSWORD'])
+    updateAdminProfile(user_id=user['USER_ID'], new_password=hashed_password)
 
-    return redirect(url_for('admin_profile'))
+    return redirect(url_for('adminprofile'))
 
 
 
@@ -668,12 +667,12 @@ def category_products(category_name):
         username=name
     )
 # user product details 
-@app.route('/user/products/<category>/<productid>')
+@app.route('/user/products/<category_name>/<int:product_id>')
 def user_product_details(category_name, product_id):
     return "Product Info"
 # categories route
-@token_required(role='user')
 @app.route('/user/categories')
+@token_required(role='user')
 def user_categories():
     return "User categories page"
 
@@ -683,29 +682,34 @@ def user_categories():
 @app.route('/add-to-cart', methods=['POST'])
 @token_required(role='user')
 def add_to_cart():
-    # print(getDataFromToken())
-    user = getDataFromToken()
+    user = getUserByToken()
     
-    user_id = user['USERID']   # adjust if your token stores differently
-    product_id = request.form.get('product_id')
+    user_id = user['USER_ID']
+    try:
+        product_id = int(request.form.get('product_id', ''))
+    except ValueError:
+        flash("Invalid product", "danger")
+        return redirect(request.referrer or url_for('user'))
 
     # Get product details
     product = getProductById(product_id)
 
-    if not product:
+    if not product or not product.get('ACTIVE') or product.get('STOCK', 0) < 1:
         flash("Product not found", "danger")
-        return redirect(request.referrer)
+        return redirect(request.referrer or url_for('user'))
 
     # Check if already in cart
     existing = getCartItem(user_id, product_id)
 
     if existing:
-        increaseCartQuantity(user_id, product_id)
+        if existing['QUANTITY'] >= product['STOCK'] or not increaseCartQuantity(user_id, product_id):
+            flash("Requested quantity is unavailable", "warning")
+            return redirect(request.referrer or url_for('user'))
     else:
         insertCartItem(user_id, product_id, product['PRICE'])
 
     flash("Added to cart successfully", "success")
-    return redirect(request.referrer)
+    return redirect(request.referrer or url_for('user'))
 
 
 @app.route('/cart')
@@ -714,7 +718,7 @@ def view_cart():
     user = getUserByToken()
     name = user.get('NAME','Dear User')
     
-    user_id = user['USERID']  # adjust if needed
+    user_id = user['USER_ID']
 
     cart_items = getUserCartItems(user_id)
 
@@ -734,7 +738,7 @@ def view_cart():
 def remove_from_cart():
     user = getUserByToken()
     name = user.get('NAME','Dear User')
-    user_id = user['USERID']
+    user_id = user['USER_ID']
     product_id = request.form.get('product_id')
 
     # delete produt from cart
@@ -746,29 +750,33 @@ def remove_from_cart():
 @app.route('/update-cart-quantity', methods=['POST'])
 @token_required(role='user')
 def update_cart_quantity():
-    user_data = getDataFromToken()
-    user_id = user_data['userid']
+    user = getUserByToken()
+    user_id = user['USER_ID']
     product_id = request.form.get('product_id')
-    quantity = request.form.get('quantity')
+    try:
+        quantity = int(request.form.get('quantity', ''))
+    except ValueError:
+        flash("Quantity must be a positive whole number", "danger")
+        return redirect(url_for('view_cart'))
 
     # update quantity
-    updateCartQuantity(quantity=quantity, user_id=user_id, product_id=product_id)
-
-    
+    if quantity < 1 or not updateCartQuantity(quantity=quantity, user_id=user_id, product_id=product_id):
+        flash("Requested quantity is unavailable", "warning")
+        return redirect(url_for('view_cart'))
 
     flash("Cart updated", "success")
     return redirect(url_for('view_cart'))
 
 
 # users orders route
-@token_required(role='user')
 @app.route('/users/orders')
+@token_required(role='user')
 def user_orders():
     return "Users orders page"
 
 # cart route
-@token_required(role='user')
 @app.route('/user/cart')
+@token_required(role='user')
 def user_cart():
     return "user cart page"
 
@@ -780,7 +788,7 @@ def checkout():
 
     user = getUserByToken()   # from your token decorator
     name = user.get('NAME','Dear User')
-    total_amount, cart_items = getCartItems(user['USERID'])
+    total_amount, cart_items = getCartItems(user['USER_ID'])
 
     return render_template(
         "user/checkout.html",
@@ -797,7 +805,10 @@ def checkout():
 def place_order():
 
     user = getUserByToken()
-    total_amount, cart_items = getCartItems(user['USERID'])
+    total_amount, cart_items = getCartItems(user['USER_ID'])
+    if not cart_items:
+        flash("Your cart is empty", "warning")
+        return redirect(url_for('view_cart'))
 
     fullname = request.form['fullname']
     phone = request.form['phone']
@@ -805,7 +816,7 @@ def place_order():
     city = request.form['city']
     pincode = request.form['pincode']
 
-    status, msg = placeOrder(user['USERID'], fullname, phone, address, city, pincode, total_amount, cart_items)
+    status, msg = placeOrder(user['USER_ID'], fullname, phone, address, city, pincode, total_amount, cart_items)
     if not status:
         flash(message=msg)
         return redirect(url_for('view_cart'))
@@ -822,10 +833,11 @@ def place_order():
 #     return
 
 @app.route('/my-orders')
+@token_required(role='user')
 def my_orders():
     user = getUserByToken()
     name = user.get('NAME','Dear User')
-    orders = myOrders(user_id=user['USERID'])
+    orders = myOrders(user_id=user['USER_ID'])
     
     return render_template("user/my_orders.html", orders=orders,username=name, user_logged_in=True)
 
@@ -844,7 +856,7 @@ def user_profile():
         phone = request.form.get('phone')
 
         updateAdminProfile(
-            userid=user['userid'],
+            user_id=user['USER_ID'],
             name=name,
             phone=phone
         )
@@ -868,15 +880,13 @@ def user_change_password():
     current_password = request.form.get('current_password')
     new_password = request.form.get('new_password')
 
-    # Verify current password
-    if not check_password_hash(user['PASSWORD'], current_password):
+    if not current_password or not new_password or not check_password_hash(user['PASSWORD'], current_password):
+        flash("Current password is incorrect or the new password is missing", "danger")
         return redirect(url_for('user_profile'))
 
     hashed_password = generate_password_hash(new_password)
 
-    
-    # update admin profile in database
-    updateAdminProfile(new_password=hashed_password, user_id=user['PASSWORD'])
+    updateAdminProfile(user_id=user['USER_ID'], new_password=hashed_password)
 
     return redirect(url_for('user_profile'))
 @app.route('/user/logout')
@@ -930,67 +940,7 @@ def user_logout():
     return json_success(normalized)
 
 
-@app.route('/api/admin/products', methods=['POST'])
-@token_required(role='admin')
-def api_admin_products_post():
-    try:
-        name = request.form.get('name')
-        description = request.form.get('description')
-        category = request.form.get('category')
-        price = request.form.get('price')
-        stock = request.form.get('stock')
-        active = request.form.get('active', '1')
-        active = int(active) if str(active).isdigit() else 1
 
-        image = request.files.get('image')
-
-        image_path = None
-        if image and image.filename:
-            ext = image.filename.rsplit('.', 1)[-1].lower()
-            if ext in ALLOWED_EXTENSIONS:
-                filename = str(uuid.uuid4()) + "_" + secure_filename(image.filename)
-                save_path = os.path.join(app.config['PRODUCT_UPLOAD_FOLDER'], filename)
-                image.save(save_path)
-                image_path = f"uploads/products/{filename}"
-
-        addProductToDB(
-            name=name,
-            description=description,
-            category=category,
-            price=price,
-            stock=stock,
-            active=active,
-            image_url=image_path,
-        )
-
-        return json_success({"message": "Product added"})
-    except Exception as e:
-        return json_error(str(e), status_code=500)
-
-
-@app.route('/api/admin/orders', methods=['GET'])
-@token_required(role='admin')
-def api_admin_orders_get():
-    orderid = request.args.get('orderid', "").strip()
-    product_name = request.args.get('productname', "").strip()
-    from_date = request.args.get('fromdate', "").strip()
-    to_date = request.args.get('todate', "").strip()
-
-    orders = getOrders(orderid=orderid, product_name=product_name, from_date=from_date, to_date=to_date)
-
-    # React code expects: id, orderId, productName, date, totalPrice, status
-    normalized = []
-    for o in orders:
-        normalized.append({
-            "id": o.get('ORDER_ID'),
-            "orderId": o.get('ORDER_ID'),
-            "productName": o.get('PRODUCT_NAME'),
-            "date": o.get('CREATED_AT').isoformat() if o.get('CREATED_AT') else None,
-            "totalPrice": float(o.get('TOTAL_PRICE')) if o.get('TOTAL_PRICE') is not None else None,
-            "status": str(o.get('ORDER_STATUS')).lower() if o.get('ORDER_STATUS') else None,
-        })
-
-    return json_success({"orders": normalized, "count": len(normalized)})
 
 
 # main

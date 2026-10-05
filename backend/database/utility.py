@@ -17,8 +17,8 @@ def addUser(name: str, email: str, phone_number: str, password: str, profile_ima
 
     query = """
         INSERT INTO users
-        (NAME, EMAIL, PHONE_NUMBER, PASSWORD, PROFILE_IMAGE)
-        VALUES (%s, %s, %s, %s, %s)
+        (NAME, EMAIL, PHONE_NUMBER, PASSWORD, PROFILE_IMAGE, ROLE)
+        VALUES (%s, %s, %s, %s, %s, 'user')
     """
 
     cursor.execute(query, (name, email, phone_number, password, profile_image))
@@ -77,7 +77,7 @@ def getProductsFromDB(name: str = "", category: str = "", status: str = ""):
         query += " AND CATEGORY = %s"
         values.append(category)
 
-    if status:
+    if status is not None and status != "":
         query += " AND ACTIVE = %s"
         values.append(status)
 
@@ -109,7 +109,7 @@ def totalOrdersCount(status: str = None):
     cursor = db.cursor()
 
     if status:
-        cursor.execute("SELECT COUNT(*) FROM ORDERS where ORDERSTATUS not like %s;", ("DELIVERED",))
+        cursor.execute("SELECT COUNT(*) FROM ORDERS WHERE ORDERSTATUS = %s;", (status,))
     else:
         cursor.execute("SELECT COUNT(*) FROM ORDERS;")
 
@@ -193,20 +193,36 @@ def usersDetails(name: str = "", email: str = "", role: str = ""):
     return users
 
 
-def updateAdminProfile(new_password: str, user_id: int):
+def updateAdminProfile(user_id: int, name: str = None, phone: str = None, new_password: str = None):
     db = databaseConfig()
-    cursor = db.cursor(dictionary=True)
+    cursor = db.cursor()
+    fields = []
+    values = []
+
+    if name is not None:
+        fields.append("NAME = %s")
+        values.append(name)
+    if phone is not None:
+        fields.append("PHONE_NUMBER = %s")
+        values.append(phone)
+    if new_password is not None:
+        fields.append("PASSWORD = %s")
+        values.append(new_password)
+
+    if not fields:
+        cursor.close()
+        db.close()
+        return False
+
+    values.append(user_id)
     cursor.execute(
-        """
-            UPDATE USERS
-            SET PASSWORD=%s
-            WHERE USER_ID=%s
-        """,
-        (new_password, user_id),
+        f"UPDATE USERS SET {', '.join(fields)} WHERE USER_ID = %s",
+        tuple(values),
     )
     db.commit()
     cursor.close()
     db.close()
+    return True
 
 
 def getProductDetailsByID(productid: int):
@@ -271,7 +287,7 @@ def viewOrderDetails(order_id):
     if not order:
         cursor.close()
         db.close()
-        return "Order not found"
+        return None, []
 
     cursor.execute(
         """
@@ -343,4 +359,3 @@ def toggleProduct(pid, status):
     db.commit()
     cursor.close()
     db.close()
-

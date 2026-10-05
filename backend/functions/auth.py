@@ -1,9 +1,9 @@
 import jwt
 from functools import wraps
-from flask import request, redirect, url_for
+from flask import current_app, request, redirect, url_for
 
 
-def token_required(app, role=None):
+def token_required(role=None):
 
     """Token protection decorator using JWT stored in cookie `token`."""
 
@@ -17,7 +17,7 @@ def token_required(app, role=None):
             try:
                 data = jwt.decode(
                     token,
-                    app.config['SECRET_KEY'],
+                    current_app.config['SECRET_KEY'],
                     algorithms=["HS256"],
                 )
             except jwt.ExpiredSignatureError:
@@ -26,7 +26,7 @@ def token_required(app, role=None):
                 return redirect(url_for('login'))
 
             if role and data.get('role') != role:
-                return "Unauthorized access"
+                return "Unauthorized access", 403
 
             return f(*args, **kwargs)
 
@@ -55,4 +55,3 @@ def get_user_by_token(app, get_user_details_by_id):
         return None
     except jwt.InvalidTokenError:
         return None
-
