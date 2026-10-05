@@ -234,7 +234,7 @@ def register():
                     filename
                 )
                 profile_image.save(save_path)
-                image_path = os.path.join('static', 'uploads', 'profiles', filename)
+                image_path = f"uploads/profiles/{filename}"
             else:
                 flash("Invalid image format")
                 return redirect(url_for('register'))
@@ -378,7 +378,11 @@ def editproduct(productid):
         flash("Product NoT updated", "Error")
         return redirect(url_for('adminproducts'))
 
-    return render_template('admin/edit_products.html',product = product)
+    return render_template(
+        'admin/edit_products.html',
+        product=product,
+        categories=getCatagoriesFromDB(),
+    )
 
 # deactivate user
 # view user 
@@ -445,7 +449,7 @@ def adminorders():
 
     return render_template('admin/orders.html',
                             total_orders = orders_count,
-                            filtred_order_count=filter_orders_count,
+                            filtered_order_count=filter_orders_count,
                             orders=orders)
 
 

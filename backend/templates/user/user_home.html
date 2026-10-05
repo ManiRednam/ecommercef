@@ -1,0 +1,100 @@
+{% extends "user/base.html" %}
+
+{% block title %}Home{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/user_home.css') }}">
+{% endblock %}
+
+{% block content %}
+
+<!-- ================= HERO SECTION ================= -->
+<section class="hero">
+    <div class="hero-text">
+        <h1>Great Deals and Offers!</h1>
+        <div class="hero-buttons">
+            <a href="{{ url_for('category_products', category_name='Electronics') }}" class="btn-primary">
+                Shop Now
+            </a>
+            <a href="{{ url_for('view_cart') }}" class="btn-secondary">
+                View Cart
+            </a>
+        </div>
+    </div>
+</section>
+
+
+<!-- ================= CATEGORY GRID ================= -->
+<section class="categories-section">
+<div>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+</div>
+    <!-- Electronics -->
+    <div class="category-card">
+        <h2>Electronics</h2>
+        <div class="category-items">
+            <img src="{{ url_for('static', filename='sample/laptop.svg') }}" alt="Laptop">
+            <img src="{{ url_for('static', filename='sample/home-theater.svg') }}" alt="Home theater">
+            <img src="{{ url_for('static', filename='sample/headset.svg') }}" alt="Headset">
+            <img src="{{ url_for('static', filename='sample/mobile.svg') }}" alt="Mobile phone">
+        </div>
+        <div>
+        <a href="{{ url_for('category_products', category_name='Electronics') }}" class="see-offers">
+            See all offers
+        </a></div>
+    </div>
+
+    <!-- Clothing -->
+    <div class="category-card">
+        <h2>Clothing</h2>
+        <div class="category-items">
+            <img src="{{ url_for('static', filename='sample/jacket.svg') }}" alt="Jacket">
+            <img src="{{ url_for('static', filename='sample/fashion2.svg') }}" alt="Fashion item 2">
+            <img src="{{ url_for('static', filename='sample/fashion3.svg') }}" alt="Fashion item 3">
+            <img src="{{ url_for('static', filename='sample/fashion4.svg') }}" alt="Fashion item 4">
+        </div>
+        <a href="{{ url_for('category_products', category_name='Clothing') }}" class="see-offers">
+            See all offers
+        </a>
+    </div>
+
+    <!-- Home & Kitchen -->
+    <div class="category-card">
+        <h2>Home & Kitchen</h2>
+        <div class="category-items">
+            <img src="{{ url_for('static', filename='sample/toaster.svg') }}" alt="Toaster">
+            <img src="{{ url_for('static', filename='sample/home2.svg') }}" alt="Home decor 2">
+            <img src="{{ url_for('static', filename='sample/home3.svg') }}" alt="Home decor 3">
+            <img src="{{ url_for('static', filename='sample/home4.svg') }}" alt="Home decor 4">
+        </div>
+        <a href="{{ url_for('category_products', category_name='Home & Kitchen') }}" class="see-offers">
+            See all offers
+        </a>
+    </div>
+
+    <!-- Sports -->
+    <div class="category-card">
+        <h2>Sports & Outdoors</h2>
+        <div class="category-items">
+            <img src="{{ url_for('static', filename='sample/shoes.svg') }}" alt="Shoes">
+            <img src="{{ url_for('static', filename='images/sample/bag.svg') }}" alt="Bag">
+            <img src="{{ url_for('static', filename='images/sample/dumbbell.svg') }}" alt="Dumbbell">
+            <img src="{{ url_for('static', filename='images/sample/tent.svg') }}" alt="Tent">
+        </div>
+        <a href="{{ url_for('category_products', category_name='Sports & Outdoors') }}" class="see-offers">
+            See all offers
+        </a>
+    </div>
+
+</section>
+
+{% endblock %}

@@ -1,4 +1,6 @@
+import re
 import sys
+from datetime import datetime
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -221,6 +223,148 @@ class RegressionTests(unittest.TestCase):
         response = self.client.get("/user/products/electronics/7")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_data(as_text=True), "Product Info")
+
+    def test_public_templates_and_static_assets_render(self):
+        for route in ("/", "/login", "/register"):
+            with self.subTest(route=route):
+                response = self.client.get(route)
+                self.assertEqual(response.status_code, 200)
+
+        css_response = self.client.get("/static/css/user.css")
+        self.assertEqual(css_response.status_code, 200)
+        css_response.close()
+
+    def test_rendered_templates_and_endpoint_references_exist(self):
+        app_path = Path(app_module.__file__)
+        templates_path = app_path.parent / "templates"
+        source = app_path.read_text(encoding="utf-8")
+
+        rendered_templates = re.findall(
+            r"render_template\(\s*['\"]([^'\"]+)['\"]",
+            source,
+        )
+        for template_name in rendered_templates:
+            with self.subTest(template=template_name):
+                self.assertTrue((templates_path / template_name).is_file())
+
+        for template_path in templates_path.rglob("*.html"):
+            content = template_path.read_text(encoding="utf-8")
+            endpoints = re.findall(r"url_for\(\s*['\"]([^'\"]+)['\"]", content)
+            for endpoint in endpoints:
+                with self.subTest(template=str(template_path), endpoint=endpoint):
+                    self.assertIn(endpoint, app_module.app.view_functions)
+
+            static_assets = re.findall(
+                r"url_for\(\s*['\"]static['\"]\s*,\s*filename=['\"]([^'\"]+)['\"]",
+                content,
+            )
+            for asset in static_assets:
+                with self.subTest(template=str(template_path), asset=asset):
+                    self.assertTrue((Path(app_module.app.static_folder) / asset).is_file())
+
+    def test_admin_templates_render_with_route_context(self):
+        self.set_admin_cookie()
+        user = {
+            "USER_ID": 7,
+            "NAME": "Admin",
+            "EMAIL": "admin@example.test",
+            "PHONE_NUMBER": "123",
+            "ROLE": "admin",
+            "STATUS": 1,
+            "CREATED_AT": datetime.now(),
+            "PASSWORD": "hash",
+        }
+        product = {
+            "PRODUCTID": 5,
+            "NAME": "Product",
+            "DESCRIPTION": "Description",
+            "CATEGORY": "Electronics",
+            "PRICE": 12,
+            "STOCK": 4,
+            "ACTIVE": 1,
+        }
+        with (
+            patch.object(app_module, "totalProducts", return_value=1),
+            patch.object(app_module, "totalOrdersCount", side_effect=[2, 1, 2, 1]),
+            patch.object(app_module, "usersDetails", return_value=[user]),
+            patch.object(app_module, "getCatagoriesFromDB", return_value=["Electronics"]),
+            patch.object(app_module, "getProductsFromDB", return_value=[product]),
+            patch.object(app_module, "getProductDetailsByID", return_value=product),
+            patch.object(app_module, "getOrders", return_value=[]),
+            patch.object(
+                app_module,
+                "viewOrderDetails",
+                return_value=(
+                    {
+                        "ORDERID": 1,
+                        "USERID": 7,
+                        "ORDERSTATUS": "PENDING",
+                        "PAYMENT_METHOD": "COD",
+                        "PAYMENT_STATUS": "PENDING",
+                        "CREATED_AT": datetime.now(),
+                    },
+                    [],
+                ),
+            ),
+            patch.object(app_module, "viewUserByAdmin", return_value=user),
+            patch.object(app_module, "getUserByToken", return_value=user),
+        ):
+            routes = (
+                "/admin",
+                "/admin/products",
+                "/admin/addproduct",
+                "/admin/editproduct/5",
+                "/admin/users",
+                "/admin/orders",
+                "/admin/view-Order/1",
+                "/admin/viewuser/7",
+                "/admin/profile",
+            )
+            for route in routes:
+                with self.subTest(route=route):
+                    response = self.client.get(route)
+                    self.assertEqual(response.status_code, 200)
+
+    def test_user_templates_render_with_route_context(self):
+        self.set_admin_cookie(role="user")
+        user = {
+            "USER_ID": 23,
+            "NAME": "Customer",
+            "EMAIL": "customer@example.test",
+            "PHONE_NUMBER": "123",
+            "PASSWORD": "hash",
+        }
+        product = {
+            "PRODUCTID": 5,
+            "NAME": "Product",
+            "DESCRIPTION": "Description",
+            "CATEGORY": "Electronics",
+            "IMAGE_URL": None,
+            "PRICE": 12,
+            "STOCK": 4,
+            "ACTIVE": 1,
+        }
+        with (
+            patch.object(app_module, "getUserByToken", return_value=user),
+            patch.object(app_module, "getProductsBasedOnSearch", return_value=[product]),
+            patch.object(app_module, "getProductsByCategory", return_value=[product]),
+            patch.object(app_module, "getUserCartItems", return_value=[]),
+            patch.object(app_module, "getCartItems", return_value=(0, [])),
+            patch.object(app_module, "myOrders", return_value=[]),
+        ):
+            routes = (
+                "/user",
+                "/user/search?q=sample",
+                "/category/Electronics",
+                "/cart",
+                "/user/checkout",
+                "/my-orders",
+                "/user/profile",
+            )
+            for route in routes:
+                with self.subTest(route=route):
+                    response = self.client.get(route)
+                    self.assertEqual(response.status_code, 200)
 
     def test_checkout_order_uses_database_user_id(self):
         self.set_admin_cookie(role="user")
